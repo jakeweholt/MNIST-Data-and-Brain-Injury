@@ -29,7 +29,7 @@ def damage_network(network_matrices, dmg_size, damage_amt):
     matrices_as_vector = vectorize_network(network_matrices)
     damage_indices = get_damage_indices(matrices_as_vector, dmg_size)
     matrices_as_vector[damage_indices] = damage_amt
-    return reshape_matrices(matrices_as_vector, matrix_shapes)
+    return [reshape_matrices(matrices_as_vector, matrix_shapes), len(damage_indices)]
 
 # filter network:
 # filter_type = "inside", filters inside-out.
@@ -149,107 +149,3 @@ def initialize_new_file(header_string, trial_counter):
 # Returns actual image labels
 def get_actual_image_labels(sess, actual, y_, test_labels):
     return sess.run(actual, feed_dict={y_: test_labels})
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

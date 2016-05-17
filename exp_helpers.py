@@ -24,13 +24,44 @@ def max_pool_2x2(x):
                            strides=[1, 2, 2, 1], padding='SAME')
 
 # facilitates the damaging of the network.
-def damage_network(network_matrices, dmg_size, damage_amt):
+def damage_network(network_matrices, dmg_size, pie_chart):
     matrix_shapes = get_matrix_shapes(network_matrices)
     matrices_as_vector = vectorize_network(network_matrices)
     damage_indices = get_damage_indices(matrices_as_vector, dmg_size)
-    matrices_as_vector[damage_indices] = damage_amt
+    [matrices_as_vector[damage_indices], num_damaged] = damagefn(matrices_as_vector[damage_indices], pie_chart)
     return [reshape_matrices(matrices_as_vector, matrix_shapes), len(damage_indices)]
 
+def damagefn(weights_to_damage, pie_chart):
+    # wang, 30 min
+    # Black (blockage), Red (Reflection), Yellow (Filtering) and Green (Transmision)
+    num_weights = len(weights_to_damage)
+    # randomly split weights into four groups
+    permuted_ind = np.random.permutation(num_weights)
+    
+    end_blocked = np.round(pie_chart[0]*num_weights)
+    blocked_ind = permuted_ind[0:end_blocked]
+    #print(len(blocked_ind))
+
+    end_reflected = np.round(pie_chart[1]*num_weights) + end_blocked
+    reflected_ind = permuted_ind[end_blocked:end_reflected]
+    #print(len(reflected_ind))
+
+    end_filtered = np.round(pie_chart[2]*num_weights) + end_reflected
+    filtered_ind = permuted_ind[end_reflected:end_filtered]
+    #print(len(filtered_ind))
+
+    weights_to_damage[blocked_ind] = 0
+    weights_to_damage[reflected_ind] = .5 * weights_to_damage[reflected_ind]
+    weights_to_damage[filtered_ind] = weight_filter(weights_to_damage[filtered_ind])
+    
+    num_damaged = len(blocked_ind) + len(reflected_ind) + len(filtered_ind)
+    
+    return [weights_to_damage, num_damaged]
+
+def weight_filter(weights_to_damage):
+    # placeholder function
+    return 0*weights_to_damage
+    
 # filter network:
 # filter_type = "inside", filters inside-out.
 # filter_type = "outside", filters outside-in.
@@ -249,7 +280,7 @@ def setup_experiment():
     
     return [matrices_to_damage, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1, actual_test_image_labels]
     
-def base_experiment(expnum = 1, default_damage_amount = 0, damages_values = np.arange(0,1,0.01), detailed_file_flag = 0, max_trials = float('inf'), histogram_flag = 0, filter_type = None, header_string = "image_index, damage_size, trial, correct_class, inferred_class, is_wrong, pred_0, pred_1" +\
+def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.arange(0,1,0.01), detailed_file_flag = 0, max_trials = float('inf'), histogram_flag = 0, filter_type = None, header_string = "image_index, damage_size, trial, correct_class, inferred_class, is_wrong, pred_0, pred_1" +\
                     ", pred_2, pred_3, pred_4, pred_5, pred_6, pred_7, pred_8, pred_9\n"):
     ############
     # User defined model parameters:
@@ -270,9 +301,10 @@ def base_experiment(expnum = 1, default_damage_amount = 0, damages_values = np.a
         dmg_counter = 0;
         for dmg_size in damages_values:
             if histogram_flag:
+                default_damage_amount = 0
                 [damaged_network, num_damaged] = filter_network(matrices_to_damage, dmg_size, default_damage_amount, filter_type)
             else:
-                [damaged_network, num_damaged] = damage_network(matrices_to_damage, dmg_size, default_damage_amount)
+                [damaged_network, num_damaged] = damage_network(matrices_to_damage, dmg_size, pie_chart)
             predicted_vectors = get_output_class_vectors(damaged_network, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1)
             predicted_test_image_labels = get_predicted_labels(predicted_vectors)
             network_accuracy = get_network_accuracy(actual_test_image_labels, predicted_test_image_labels)

@@ -145,16 +145,17 @@ def output_summary_data_to_csv(file_name, accuracies, trial_counter):
 
     
 # returns new and unique file name
-def get_file_name(trial_counter):
-    return ("mnist_cnn_trial_%d_" % trial_counter) + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f.csv")
+def get_file_name(trial_counter, expnum):
+    return ("mnist_cnn_exp%d_trial_%d_" % (expnum, trial_counter)) + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f.csv")
 
 # creates a new .csv file in working directory
-def initialize_new_file(header_string, trial_counter):
-    file_name = get_file_name(trial_counter)
+def initialize_new_file(header_string, trial_counter, expnum):
+    file_name = get_file_name(trial_counter, expnum)
     fd = open(file_name, 'a')
     fd.write(header_string) 
     fd.close()
     return file_name
+
 
 # Returns actual image labels
 def get_actual_image_labels(sess, actual, y_, test_labels):
@@ -248,7 +249,7 @@ def setup_experiment():
     
     return [matrices_to_damage, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1, actual_test_image_labels]
     
-def base_experiment(default_damage_amount = 0, damages_values = np.arange(0,1,0.01), detailed_file_flag = 0, max_trials = float('inf'), histogram_flag = 0, filter_type = None, header_string = "image_index, damage_size, trial, correct_class, inferred_class, is_wrong, pred_0, pred_1" +\
+def base_experiment(expnum = 1, default_damage_amount = 0, damages_values = np.arange(0,1,0.01), detailed_file_flag = 0, max_trials = float('inf'), histogram_flag = 0, filter_type = None, header_string = "image_index, damage_size, trial, correct_class, inferred_class, is_wrong, pred_0, pred_1" +\
                     ", pred_2, pred_3, pred_4, pred_5, pred_6, pred_7, pred_8, pred_9\n"):
     ############
     # User defined model parameters:
@@ -265,7 +266,7 @@ def base_experiment(default_damage_amount = 0, damages_values = np.arange(0,1,0.
     accuracies = np.zeros((len(damages_values), 3))
     trial_counter = 1
     while True:
-        file_name = initialize_new_file(header_string, trial_counter)
+        file_name = initialize_new_file(header_string, trial_counter, expnum)
         dmg_counter = 0;
         for dmg_size in damages_values:
             if histogram_flag:

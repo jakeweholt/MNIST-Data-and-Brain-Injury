@@ -133,6 +133,12 @@ def output_data_to_csv(file_name, damage_size, trial_number, actual_labels, pred
             fd.write('%f,' % class_score) 
         fd.write('\n')
     fd.close
+
+# handles printing everything to .csv file. 
+def output_summary_data_to_csv(file_name, accuracies, trial_counter):
+    np.savetxt(file_name, accuracies, delimiter=",", fmt='%1.4f')
+
+
     
 # returns new and unique file name
 def get_file_name(trial_counter):

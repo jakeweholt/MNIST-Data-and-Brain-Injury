@@ -24,14 +24,16 @@ def max_pool_2x2(x):
                            strides=[1, 2, 2, 1], padding='SAME')
 
 # facilitates the damaging of the network.
-def damage_network(network_matrices, dmg_size, pie_chart):
+def damage_network(network_matrices, dmg_size, pie_chart, coeff, sigma):
     matrix_shapes = get_matrix_shapes(network_matrices)
     matrices_as_vector = vectorize_network(network_matrices)
+    high_weight = np.percentile(np.abs(matrices_as_vector),95)
     damage_indices = get_damage_indices(matrices_as_vector, dmg_size)
-    [matrices_as_vector[damage_indices], num_damaged] = damagefn(matrices_as_vector[damage_indices], pie_chart)
+    [matrices_as_vector[damage_indices], num_damaged] = damagefn(matrices_as_vector[damage_indices], pie_chart, high_weight, coeff, sigma)
+
     return [reshape_matrices(matrices_as_vector, matrix_shapes), len(damage_indices)]
 
-def damagefn(weights_to_damage, pie_chart):
+def damagefn(weights_to_damage, pie_chart, high_weight, coeff, sigma):
     # wang, 30 min
     # Black (blockage), Red (Reflection), Yellow (Filtering) and Green (Transmision)
     num_weights = len(weights_to_damage)
@@ -52,15 +54,31 @@ def damagefn(weights_to_damage, pie_chart):
 
     weights_to_damage[blocked_ind] = 0
     weights_to_damage[reflected_ind] = .5 * weights_to_damage[reflected_ind]
-    weights_to_damage[filtered_ind] = weight_filter(weights_to_damage[filtered_ind])
+    weights_to_damage[filtered_ind] = weight_filter(weights_to_damage[filtered_ind], high_weight, coeff, sigma)
     
     num_damaged = len(blocked_ind) + len(reflected_ind) + len(filtered_ind)
     
     return [weights_to_damage, num_damaged]
 
-def weight_filter(weights_to_damage):
-    # placeholder function
-    return 0*weights_to_damage
+def weight_filter(weights_to_damage, high_weight, coeff, sigma):
+    # TODO: make this more sophisticated
+    if len(weights_to_damage):
+        scaled_weights = weights_to_damage / high_weight # mostly between -1 and 10
+        signs = np.sign(scaled_weights)
+        filtered_weights = signs * filter_polynomial(np.abs(scaled_weights), coeff, sigma) * high_weight
+        return filtered_weights
+    else:
+        # this if-else block might save some time in the common case of 
+        # having empty weights vector 
+        return weights_to_damage
+    
+def filter_polynomial(x, coeff, sigma):
+    # TODO: make this more sophisticated
+    y = coeff[0] * x**2 + coeff[1] * x + coeff[2] + sigma * np.random.randn(len(x),)
+    #y = -.2774 * x**2 + .9094 * x - .0192 + .05*np.random.randn(len(x),)
+    #y = -.1411 * x**2 + .8355 * x - .0127 + .05*np.random.randn(len(x),)
+    
+    return y
     
 # filter network:
 # filter_type = "inside", filters inside-out.
@@ -280,8 +298,8 @@ def setup_experiment():
     
     return [matrices_to_damage, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1, actual_test_image_labels]
     
-def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.arange(0,1,0.01), detailed_file_flag = 0, max_trials = float('inf'), histogram_flag = 0, filter_type = None, header_string = "image_index, damage_size, trial, correct_class, inferred_class, is_wrong, pred_0, pred_1" +\
-                    ", pred_2, pred_3, pred_4, pred_5, pred_6, pred_7, pred_8, pred_9\n"):
+def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.arange(0,1,0.01), detailed_file_flag = 0, max_trials = float('inf'), histogram_flag = 0, filter_type = None, aging_flag = 0, header_string = "image_index, damage_size, trial, correct_class, inferred_class, is_wrong, pred_0, pred_1" +\
+                    ", pred_2, pred_3, pred_4, pred_5, pred_6, pred_7, pred_8, pred_9\n", coeff = [-.2774, .9094, -.0192], sigma = .05):
     ############
     # User defined model parameters:
     # default_damage_amount = what the weights are set to when they are damaged
@@ -299,12 +317,13 @@ def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.ar
     while True:
         file_name = initialize_new_file(header_string, trial_counter, expnum)
         dmg_counter = 0;
+        matrices_to_damage_this_trial = matrices_to_damage
         for dmg_size in damages_values:
             if histogram_flag:
                 default_damage_amount = 0
-                [damaged_network, num_damaged] = filter_network(matrices_to_damage, dmg_size, default_damage_amount, filter_type)
+                [damaged_network, num_damaged] = filter_network(matrices_to_damage_this_trial, dmg_size, default_damage_amount, filter_type)
             else:
-                [damaged_network, num_damaged] = damage_network(matrices_to_damage, dmg_size, pie_chart)
+                [damaged_network, num_damaged] = damage_network(matrices_to_damage_this_trial, dmg_size, pie_chart, coeff, sigma)
             predicted_vectors = get_output_class_vectors(damaged_network, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1)
             predicted_test_image_labels = get_predicted_labels(predicted_vectors)
             network_accuracy = get_network_accuracy(actual_test_image_labels, predicted_test_image_labels)
@@ -312,11 +331,15 @@ def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.ar
             if detailed_file_flag:
                 output_data_to_csv(file_name, dmg_size, trial_counter, actual_test_image_labels, predicted_test_image_labels, predicted_vectors)
             
+            if aging_flag:
+                # want damage to accumulate over this trial (but not between trials)
+                matrices_to_damage_this_trial = damaged_network
+            
             accuracies[dmg_counter, 0] = dmg_size
             accuracies[dmg_counter, 1] = num_damaged
             accuracies[dmg_counter, 2] = network_accuracy
             dmg_counter = dmg_counter + 1;
-        if ~detailed_file_flag:
+        if not detailed_file_flag:
             output_summary_data_to_csv(file_name, accuracies, trial_counter)
         print("Trials completed: %d\n" % trial_counter)
         trial_counter = trial_counter + 1

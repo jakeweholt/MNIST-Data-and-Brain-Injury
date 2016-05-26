@@ -24,11 +24,11 @@ def max_pool_2x2(x):
                            strides=[1, 2, 2, 1], padding='SAME')
 
 # facilitates the damaging of the network.
-def damage_network(network_matrices, dmg_size, pie_chart, coeff, sigma):
+def damage_network(network_matrices, dmg_size, pie_chart, coeff, sigma, net_size):
     matrix_shapes = get_matrix_shapes(network_matrices)
     matrices_as_vector = vectorize_network(network_matrices)
     high_weight = np.percentile(np.abs(matrices_as_vector),95)
-    damage_indices = get_damage_indices(matrices_as_vector, dmg_size)
+    damage_indices = get_damage_indices(matrices_as_vector, dmg_size, net_size)
     [matrices_as_vector[damage_indices], num_damaged] = damagefn(matrices_as_vector[damage_indices], pie_chart, high_weight, coeff, sigma)
 
     return [reshape_matrices(matrices_as_vector, matrix_shapes), len(damage_indices)]
@@ -63,7 +63,7 @@ def damagefn(weights_to_damage, pie_chart, high_weight, coeff, sigma):
 def weight_filter(weights_to_damage, high_weight, coeff, sigma):
     # TODO: make this more sophisticated
     if len(weights_to_damage):
-        scaled_weights = weights_to_damage / high_weight # mostly between -1 and 10
+        scaled_weights = weights_to_damage / high_weight # mostly between -1 and 1
         signs = np.sign(scaled_weights)
         filtered_weights = signs * filter_polynomial(np.abs(scaled_weights), coeff, sigma) * high_weight
         return filtered_weights
@@ -84,14 +84,22 @@ def filter_polynomial(x, coeff, sigma):
 # filter_type = "inside", filters inside-out.
 # filter_type = "outside", filters outside-in.
 # filters from median + and - the percentile window size, so the window is actually 2*percentile_window in size.
-def filter_network(network_matrices, percentile_window, damage_amt, filter_type):
+def filter_network(network_matrices, percentile_window, damage_amt, filter_type, net_size):
     matrix_shapes = get_matrix_shapes(network_matrices)
     matrices_as_vector = vectorize_network(network_matrices)
     if filter_type == "inside":
-        [return_vector, num_damaged] = filter_vector_in(matrices_as_vector, percentile_window, damage_amt)
+        [return_vector, num_damaged] = filter_vector_in(matrices_as_vector, percentile_window, damage_amt, net_size)
     elif filter_type == "outside":
-        [return_vector, num_damaged] = filter_vector_out(matrices_as_vector, percentile_window, damage_amt)
+        [return_vector, num_damaged] = filter_vector_out(matrices_as_vector, percentile_window, damage_amt, net_size)
     return [reshape_matrices(return_vector, matrix_shapes), num_damaged]
+    
+def sparsify_network(network_matrices, percentile_window, net_size):
+    # sparsify network by removing small weights (within percentile_window)
+    damage_amt = 0
+    filter_type = "inside"
+    [sparsified_networks, num_removed] = filter_network(network_matrices, percentile_window, damage_amt, filter_type, net_size)
+    return [sparsified_networks, num_removed]
+
     
 # returns shapes of original network matrices for reshaping
 def get_matrix_shapes(network_matrices):
@@ -108,8 +116,8 @@ def vectorize_network(network_matrices):
     return vector
 
 # returns random sample of indices to damage
-def get_damage_indices(matrices_as_vector, dmg_size):
-    num_elements_to_damage = int(math.floor(dmg_size * len(matrices_as_vector)))
+def get_damage_indices(matrices_as_vector, dmg_size, net_size):
+    num_elements_to_damage = int(math.floor(dmg_size * net_size))
     non_zero_elements = np.nonzero(matrices_as_vector)
     linear_indices = random.sample(range(0, len(non_zero_elements[0])), num_elements_to_damage)
     return non_zero_elements[0][linear_indices]
@@ -132,9 +140,22 @@ def get_vector_lengths(matrix_shapes):
     return length
 
 # helper function for filter, inside damage
-def filter_vector_in(matrices_as_vector, percentile_window, damage_amt):
-    upper_perc = np.percentile(matrices_as_vector, 50 + percentile_window)
-    lower_perc = np.percentile(matrices_as_vector, 50 - percentile_window)
+def filter_vector_in(matrices_as_vector, percentile_window, damage_amt, net_size):
+    vec_size = len(matrices_as_vector)
+    if vec_size > net_size:
+        # means that we already set some thresholded section to 0. Don't want to count those zeros
+        # in calculating percentile
+        num_thresholded = vec_size - net_size
+        print(num_thresholded)
+        sorted_ind = np.argsort(matrices_as_vector) #indices that would sort matrices_as_vector
+        sorted_ind = sorted_ind[num_thresholded:vec_size] # cut off num_thresholded from front
+        values_to_check = matrices_as_vector[sorted_ind]
+    else:
+        values_to_check = matrices_as_vector
+    upper_perc = np.percentile(values_to_check, 50 + percentile_window)
+    print(upper_perc)
+    lower_perc = np.percentile(values_to_check, 50 - percentile_window)
+    print(lower_perc)
     damaged_number = 0
     for i in range(len(matrices_as_vector)):
         if (matrices_as_vector[i] <= upper_perc and matrices_as_vector[i] >= lower_perc):
@@ -143,9 +164,22 @@ def filter_vector_in(matrices_as_vector, percentile_window, damage_amt):
     return [matrices_as_vector, damaged_number]
 
 # helper function for filter, outside damage
-def filter_vector_out(matrices_as_vector, percentile_window, damage_amt):
-    upper_perc = np.percentile(matrices_as_vector, 100 - percentile_window)
-    lower_perc = np.percentile(matrices_as_vector, 0 + percentile_window)
+def filter_vector_out(matrices_as_vector, percentile_window, damage_amt, net_size):
+    vec_size = len(matrices_as_vector)
+    if vec_size > net_size:
+        # means that we already set some thresholded section to 0. Don't want to count those zeros
+        # in calculating percentile
+        num_thresholded = vec_size - net_size
+        print(num_thresholded)
+        sorted_ind = np.argsort(np.abs(matrices_as_vector))
+        sorted_ind = sorted_ind[num_thresholded:vec_size]
+        values_to_check = matrices_as_vector[sorted_ind]
+    else:
+        values_to_check = matrices_as_vector
+    upper_perc = np.percentile(values_to_check, 100 - percentile_window)
+    print(upper_perc)
+    lower_perc = np.percentile(values_to_check, 0 + percentile_window)
+    print(lower_perc)
     damaged_number = 0
     for i in range(len(matrices_as_vector)):
         if (matrices_as_vector[i] > upper_perc or matrices_as_vector[i] < lower_perc):
@@ -299,7 +333,7 @@ def setup_experiment():
     return [matrices_to_damage, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1, actual_test_image_labels]
     
 def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.arange(0,1,0.01), detailed_file_flag = 0, max_trials = float('inf'), histogram_flag = 0, filter_type = None, aging_flag = 0, header_string = "image_index, damage_size, trial, correct_class, inferred_class, is_wrong, pred_0, pred_1" +\
-                    ", pred_2, pred_3, pred_4, pred_5, pred_6, pred_7, pred_8, pred_9\n", coeff = [-.2774, .9094, -.0192], sigma = .05):
+                    ", pred_2, pred_3, pred_4, pred_5, pred_6, pred_7, pred_8, pred_9\n", coeff = [-.2774, .9094, -.0192], sigma = .05, sparsity_cutoff = 0):
     ############
     # User defined model parameters:
     # default_damage_amount = what the weights are set to when they are damaged
@@ -309,6 +343,12 @@ def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.ar
     # histogram_flag can be 0 for random damage, 1 for chopping parts of the histogram out 
     
     [matrices_to_damage, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1, actual_test_image_labels] = setup_experiment()
+    net_size = len(vectorize_network(matrices_to_damage))
+    if sparsity_cutoff:
+        [matrices_to_damage, num_removed] = sparsify_network(matrices_to_damage, sparsity_cutoff, net_size)
+        print(net_size)
+        net_size = net_size - num_removed
+        print(net_size)
 
     ############
     # Damage and file output loop:
@@ -321,9 +361,9 @@ def base_experiment(expnum = 1, pie_chart = [1, 0, 0, 0], damages_values = np.ar
         for dmg_size in damages_values:
             if histogram_flag:
                 default_damage_amount = 0
-                [damaged_network, num_damaged] = filter_network(matrices_to_damage_this_trial, dmg_size, default_damage_amount, filter_type)
+                [damaged_network, num_damaged] = filter_network(matrices_to_damage_this_trial, dmg_size, default_damage_amount, filter_type, net_size)
             else:
-                [damaged_network, num_damaged] = damage_network(matrices_to_damage_this_trial, dmg_size, pie_chart, coeff, sigma)
+                [damaged_network, num_damaged] = damage_network(matrices_to_damage_this_trial, dmg_size, pie_chart, coeff, sigma, net_size)
             predicted_vectors = get_output_class_vectors(damaged_network, sess, y_conv, x, test_images, keep_prob, W_conv1, W_conv2, W_fc1)
             predicted_test_image_labels = get_predicted_labels(predicted_vectors)
             network_accuracy = get_network_accuracy(actual_test_image_labels, predicted_test_image_labels)
